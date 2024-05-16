@@ -1,215 +1,92 @@
-version: '3.9'
+version: '2.1'
 
 services:
-  grafana:
-    image: "grafana/grafana:${GRAFANA_VERSION}"
-    ports:
-      - 3000:3000
-    environment:
-      GF_PATHS_DATA: /var/lib/grafana
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD}
-    volumes:
-      - ./grafana/provisioning:/etc/grafana/provisioning
-      - ./grafana/dashboards:/var/lib/grafana/dashboards
-    container_name: grafana
-    depends_on:
-      - prometheus
-    networks:
-      - kafka-platform
-  
-  prometheus:
-    image: "prom/prometheus:${PROMETHEUS_VERSION}"
-    ports:
-      - "9090:9090"
-    volumes:
-      - ./etc/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
-    command: "--config.file=/etc/prometheus/prometheus.yml"
-    container_name: prometheus
-    networks:
-      - kafka-platform
-
-  jmx-kafka1:
-    image: "sscaling/jmx-prometheus-exporter"
-    ports:
-      - "5556:5556"
-    environment:
-      CONFIG_YML: "/etc/jmx_exporter/config.yml"
-    volumes:
-      - ./etc/jmx_exporter/config_kafka1.yml:/etc/jmx_exporter/config.yml
-    container_name: jmx-kafka1
-    depends_on:
-      - kafka1
-    networks:
-      - kafka-platform
-
   zoo1:
-    image: confluentinc/cp-zookeeper:${CONFLUENT_VERSION}
+    image: confluentinc/cp-zookeeper:7.3.2
     hostname: zoo1
     container_name: zoo1
     ports:
       - "2181:2181"
     environment:
       ZOOKEEPER_CLIENT_PORT: 2181
-      #ZOOKEEPER_SERVER_ID: 1
-      ZOOKEEPER_INIT_LIMIT: 5 # by default 10 ticks
-      ZOOKEEPER_SYNC_LIMIT: 2 # by default 5 ticks
-      #ZOOKEEPER_SERVERS: zoo1:2888:3888 # by default
-      ZOOKEEPER_TICK_TIME: 2000 # heartbeat checker, default: 3000 ms enabled
-      #ZOOKEEPER_LOG4J_ROOT_LOGLEVEL: DEBUG # by default INFO
-      EXTRA_ARGS: "-Djava.security.auth.login.config=/etc/kafka/zookeeper_jaas.conf"
-    volumes:
-      - ./etc/secrets/zookeeper_jaas.conf:/etc/kafka/zookeeper_jaas.conf
-      - ./etc/zookeeper.properties:/etc/confluent/docker/zookeeper.properties.template
-    networks:
-      - kafka-platform
+      ZOOKEEPER_SERVER_ID: 1
+      ZOOKEEPER_SERVERS: zoo1:2888:3888
 
   kafka1:
-    image: confluentinc/cp-kafka:${CONFLUENT_VERSION}
+    image: confluentinc/cp-kafka:7.3.2
     hostname: kafka1
     container_name: kafka1
     ports:
       - "9092:9092"
       - "29092:29092"
-      - "9991:9991"
+      - "9999:9999"
     environment:
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka1:19092,EXTERNAL://${DOCKER_HOST_IP:-127.0.0.1}:9092,DOCKER://host.docker.internal:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT,DOCKER:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
       KAFKA_ZOOKEEPER_CONNECT: "zoo1:2181"
       KAFKA_BROKER_ID: 1
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:SASL_PLAINTEXT,SASL_HOST:SASL_PLAINTEXT,EXTERNAL:SASL_PLAINTEXT
-      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka1:19092,SASL_HOST://localhost:9092,EXTERNAL://192.168.7.212:29092
-      KAFKA_LISTENERS: INTERNAL://kafka1:19092,SASL_HOST://:9092,EXTERNAL://:29092
-      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
-      #KAFKA_CONTROLLER_QUORUM_VOTERS: '1@kafka1:29093'
-      KAFKA_LOG4J_LOGGERS: "kafka.authorizer.logger=DEBUG,kafka.controller=INFO,kafka.producer.async.DefaultEventHandler=INFO,state.change.logger=INFO"
-      #KAFKA_LOG4J_ROOT_LOGLEVEL: DEBUG
-      #KAFKA_TOOLS_LOG4J_LOGLEVEL: DEBUG
-      #KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LOG4J_LOGGERS: "kafka.controller=INFO,kafka.producer.async.DefaultEventHandler=INFO,state.change.logger=INFO"
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
-      KAFKA_DELETE_TOPIC_ENABLE: "true"
-      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
-      KAFKA_SCHEMA_REGISTRY_URL: "schemaregistry:8081"
-      #KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
-      KAFKA_JMX_PORT: 9991
-      KAFKA_JMX_HOSTNAME: localhost
-      KAFKA_ZOOKEEPER_SET_ACL: "true"
+      KAFKA_JMX_PORT: 9001
+      KAFKA_JMX_HOSTNAME: ${DOCKER_HOST_IP:-127.0.0.1}
       KAFKA_AUTHORIZER_CLASS_NAME: kafka.security.authorizer.AclAuthorizer
-      KAFKA_SUPER_USERS: User:kafka
-      KAFKA_ALLOW_EVERYONE_IF_NO_ACL_FOUND: "false"
-      KAFKA_SASL_ENABLED_MECHANISMS: SCRAM-SHA-256
-      KAFKA_SASL_MECHANISM_INTER_BROKER_PROTOCOL: SCRAM-SHA-256
-      #KAFKA_SECURITY_INTER_BROKER_PROTOCOL: SASL_PLAINTEXT
-      KAFKA_SECURITY_PROTOCOL: 'SASL_PLAINTEXT'
-      KAFKA_OPTS: -Djava.security.auth.login.config=/etc/kafka/kafka_server_jaas.conf
-      #KAFKA_HEAP_OPTS: ${KAFKA_BROKER_HEAP_OPTS}
-      CONFLUENT_METRICS_REPORTER_BOOTSTRAP_SERVERS: kafka1:19092
-      CONFLUENT_METRICS_REPORTER_ZOOKEEPER_CONNECT: zoo1:2181
-      CONFLUENT_METRICS_REPORTER_TOPIC_REPLICAS: 1
-      CONFLUENT_METRICS_ENABLE: 'false'
-      # The interval at which to rollback transactions that have timed out.
-      #KAFKA_TRANSACTION_ABORT_TIMED_OUT_TRANSACTION_CLEANUP_INTERVAL_MS: 60000
-
-      # The maximum allowed timeout for transactions. If a client’s requested transaction time exceed this, then the
-      # broker will return an error in InitProducerIdRequest. This prevents a client from too large of a timeout,
-      # which can stall consumers reading from topics included in the transaction.
-      #KAFKA_TRANSACTION_MAX_TIMEOUT_MS: 900000
-
-      # The interval at which to remove transactions that have expired due to transactional.id.expiration.ms passing.
-      #KAFKA_TRANSACTION_REMOVE_EXPIRED_TRANSACTION_CLEANUP_INTERVAL_MS: 3600000
-
-      # Batch size for reading from the transaction log segments when loading producer ids and transactions into the
-      # cache (soft-limit, overridden if records are too large).
-      #KAFKA_TRANSACTION_STATE_LOG_LOAD_BUFFER_SIZE: 5242880
-
-      # The number of partitions for the transaction topic, "__transaction_state" (should not change after deployment).
-      # KAFKA_TRANSACTION_STATE_LOG_NUM_PARTITIONS: 48
-
-      # The transaction topic segment bytes should be kept relatively small in order to facilitate faster log
-      # compaction and cache loads.
-      #KAFKA_TRANSACTION_STATE_LOG_SEGMENT_BYTES: 104857600
-
-      # The maximum amount of time in ms that the transaction coordinator will wait before proactively expire a
-      # producer's transactional id without receiving any transaction status updates from it.
-      #KAFKA_TRANSACTIONAL_ID_EXPIRATION_MS: 604800000
-    volumes:
-      - ./etc/secrets/kafka_server_jaas.conf:/etc/kafka/kafka_server_jaas.conf
-    # deploy:
-    #   resources:
-    #     limits:
-    #       memory: ${KAFKA_BROKER_MEM_LIMIT}
-    networks:
-      - kafka-platform
+      KAFKA_ALLOW_EVERYONE_IF_NO_ACL_FOUND: "true"
     depends_on:
       - zoo1
 
-  schemaregistry:
-    image: confluentinc/cp-schema-registry:${CONFLUENT_VERSION}
-    restart: always
-    hostname: schemaregistry
-    container_name: schemaregistry
+  kafka-schema-registry:
+    image: confluentinc/cp-schema-registry:7.3.2
+    hostname: kafka-schema-registry
+    container_name: kafka-schema-registry
     ports:
       - "8081:8081"
     environment:
-      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: kafka1:19092
-      SCHEMA_REGISTRY_KAFKASTORE_SECURITY_PROTOCOL: SASL_PLAINTEXT
-      SCHEMA_REGISTRY_KAFKASTORE_SASL_MECHANISM: SCRAM-SHA-256
-      SCHEMA_REGISTRY_HOST_NAME: schemaregistry
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: PLAINTEXT://kafka1:19092
+      SCHEMA_REGISTRY_HOST_NAME: kafka-schema-registry
       SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
-      SCHEMA_REGISTRY_KAFKASTORE_CONNECTION_URL: "zoo1:2181"
-      #SCHEMA_REGISTRY_OPTS: "-Djava.security.auth.login.config=/etc/kafka/schema_registry_jaas.conf"
-      SCHEMA_REGISTRY_KAFKASTORE_SASL_JAAS_CONFIG: "org.apache.kafka.common.security.scram.ScramLoginModule required username=\"sreguser\" password=\"sreguser159\";"
-    volumes:
-      - ./etc/secrets/schema_registry_jaas.conf:/etc/kafka/schema_registry_jaas.conf
-    networks:
-      - kafka-platform
     depends_on:
       - zoo1
+      - kafka1
+
   
-  restproxy:
-    image: confluentinc/cp-kafka-rest:${CONFLUENT_VERSION}
-    restart: always
-    hostname: restproxy
-    container_name: restproxy
+  kafka-rest-proxy:
+    image: confluentinc/cp-kafka-rest:7.3.2
+    hostname: kafka-rest-proxy
+    container_name: kafka-rest-proxy
     ports:
       - "8082:8082"
     environment:
-      KAFKA_REST_ZOOKEEPER_CONNECT: "zoo1:2181"
+      # KAFKA_REST_ZOOKEEPER_CONNECT: zoo1:2181
       KAFKA_REST_LISTENERS: http://0.0.0.0:8082/
-      KAFKA_REST_SCHEMA_REGISTRY_URL: http://schemaregistry:8081/
-      KAFKA_REST_HOST_NAME: restproxy
-      KAFKA_REST_DEBUG: "true"
-      KAFKA_REST_BOOTSTRAP_SERVERS: kafka1:19092
-      KAFKA_REST_CLIENT_SASL_MECHANISM: SCRAM-SHA-256
-      KAFKA_REST_CLIENT_SECURITY_PROTOCOL: SASL_PLAINTEXT
-      KAFKA_REST_CLIENT_SASL_JAAS_CONFIG: "org.apache.kafka.common.security.scram.ScramLoginModule required username=\"restproxy\" password=\"restproxy159\";"
-      #KAFKA_REST_OPTS: "-Djava.security.auth.login.config=/etc/kafka/rest_proxy_jaas.conf -Dzookeeper.sasl.clientconfig=ZkClient"
-    volumes:
-      - ./etc/secrets/rest_proxy_jaas.conf:/etc/kafka/rest_proxy_jaas.conf
-    networks:
-      - kafka-platform
+      KAFKA_REST_SCHEMA_REGISTRY_URL: http://kafka-schema-registry:8081/
+      KAFKA_REST_HOST_NAME: kafka-rest-proxy
+      KAFKA_REST_BOOTSTRAP_SERVERS: PLAINTEXT://kafka1:19092
     depends_on:
+      - zoo1
       - kafka1
+      - kafka-schema-registry
+
   
   kafka-connect:
-    image: confluentinc/cp-kafka-connect:${CONFLUENT_VERSION}
-    restart: always
+    image: confluentinc/cp-kafka-connect:7.3.2
     hostname: kafka-connect
     container_name: kafka-connect
     ports:
       - "8083:8083"
     environment:
-      CONNECT_SASL_MECHANISM: SCRAM-SHA-256
-      CONNECT_SECURITY_PROTOCOL: SASL_PLAINTEXT
-      CONNECT_BOOTSTRAP_SERVERS: kafka1:19092
+      CONNECT_BOOTSTRAP_SERVERS: "kafka1:19092"
       CONNECT_REST_PORT: 8083
       CONNECT_GROUP_ID: compose-connect-group
       CONNECT_CONFIG_STORAGE_TOPIC: docker-connect-configs
       CONNECT_OFFSET_STORAGE_TOPIC: docker-connect-offsets
       CONNECT_STATUS_STORAGE_TOPIC: docker-connect-status
       CONNECT_KEY_CONVERTER: io.confluent.connect.avro.AvroConverter
-      CONNECT_KEY_CONVERTER_SCHEMA_REGISTRY_URL: 'http://schemaregistry:8081'
+      CONNECT_KEY_CONVERTER_SCHEMA_REGISTRY_URL: 'http://kafka-schema-registry:8081'
       CONNECT_VALUE_CONVERTER: io.confluent.connect.avro.AvroConverter
-      CONNECT_VALUE_CONVERTER_SCHEMA_REGISTRY_URL: 'http://schemaregistry:8081'
+      CONNECT_VALUE_CONVERTER_SCHEMA_REGISTRY_URL: 'http://kafka-schema-registry:8081'
       CONNECT_INTERNAL_KEY_CONVERTER: "org.apache.kafka.connect.json.JsonConverter"
       CONNECT_INTERNAL_VALUE_CONVERTER: "org.apache.kafka.connect.json.JsonConverter"
       CONNECT_REST_ADVERTISED_HOST_NAME: "kafka-connect"
@@ -219,18 +96,13 @@ services:
       CONNECT_OFFSET_STORAGE_REPLICATION_FACTOR: "1"
       CONNECT_STATUS_STORAGE_REPLICATION_FACTOR: "1"
       CONNECT_PLUGIN_PATH: '/usr/share/java,/etc/kafka-connect/jars,/usr/share/confluent-hub-components'
-      #CONNECT_OPTS: "-Djava.security.auth.login.config=/etc/kafka/connect_jaas.conf"
-      CONNECT_SASL_JAAS_CONFIG: "org.apache.kafka.common.security.scram.ScramLoginModule required username=\"connect\" password=\"connect159\";"
     volumes:
       - ./connectors:/etc/kafka-connect/jars/
-      - ./etc/secrets/connect_jaas.conf:/etc/kafka/connect_jaas.conf
-    networks:
-      - kafka-platform
     depends_on:
       - zoo1
       - kafka1
-      - schemaregistry
-      - restproxy
+      - kafka-schema-registry
+      - kafka-rest-proxy
     command:
       - bash
       - -c
@@ -241,41 +113,18 @@ services:
 
   
   ksqldb-server:
-    image: confluentinc/cp-ksqldb-server:${CONFLUENT_VERSION}
+    image: confluentinc/cp-ksqldb-server:7.3.2
     hostname: ksqldb-server
     container_name: ksqldb-server
     ports:
       - "8088:8088"
     environment:
-      KSQL_BOOTSTRAP_SERVERS: kafka1:19092
+      KSQL_BOOTSTRAP_SERVERS: PLAINTEXT://kafka1:19092
       KSQL_LISTENERS: http://0.0.0.0:8088/
-      KSQL_KSQL_SERVICE_ID: ksqldb-server_1
-      # KSQL_KSQL_QUERIES_FILE: /opt/data/queries.sql or KSQL_OPTS="-Dksql.queries.file=/path/in/container/queries.sql"
-      KSQL_KSQL_LOGGING_PROCESSING_STREAM_AUTO_CREATE: "true"
-      KSQL_KSQL_LOGGING_PROCESSING_TOPIC_AUTO_CREATE: "true"
-      KSQL_KSQL_SCHEMA_REGISTRY_URL: schemaregistry:8081
-      # additional log configuration:
-      KSQL_LOG4J_PROCESSING_LOG_BROKERLIST: kafka1:19092
-      KSQL_LOG4J_PROCESSING_LOG_TOPIC: demo_processing_log
-      KSQL_KSQL_LOGGING_PROCESSING_TOPIC_NAME: demo_processing_log
-      # from official doc to enable replication and SASL & JAAS security mechanism enabled:
-      # KSQL_KSQL_SINK_REPLICAS=3
-      # KSQL_KSQL_STREAMS_REPLICATION_FACTOR=3
-      # KSQL_KSQL_INTERNAL_TOPIC_REPLICAS=3
-      KSQL_SECURITY_PROTOCOL: SASL_PLAINTEXT
-      KSQL_SASL_MECHANISM: SCRAM-SHA-256
-      KSQL_SASL_JAAS_CONFIG: "org.apache.kafka.common.security.scram.ScramLoginModule required username=\"ksqluser\" password=\"ksqluser159\";"
-      #KAFKA_OPTS: "-Djava.security.auth.login.config=/etc/kafka/ksqldb_jaas.conf"
-      # configuration for UDFs:
-      # KSQL_KSQL_EXTENSION_DIR="/opt/ksqldb-udfs"
-    volumes:
-      - ./etc/secrets/ksqldb_jaas.conf:/etc/kafka/ksqldb_jaas.conf
-    networks:
-      - kafka-platform
+      KSQL_KSQL_SERVICE_ID: ksqldb-server_
     depends_on:
       - zoo1
       - kafka1
-      - schemaregistry
 
   ksqldb-cli:
     image: confluentinc/cp-ksqldb-cli:${CONFLUENT_VERSION}
@@ -284,21 +133,13 @@ services:
       - ksqldb-server
     entrypoint: /bin/sh
     tty: true
-    networks:
-      - kafka-platform
 
   postgresql:
     hostname: postgresql
     container_name: postgresql
     extends:
       service: postgresql
-      file: conduktor.yml
-    networks:
-      - kafka-platform 
-    depends_on:
-      - schemaregistry
-      - kafka1
-      - kafka-connect
+      file: conduktor.yml 
             
   conduktor-console:
     hostname: conduktor-console
@@ -306,22 +147,7 @@ services:
     extends:
       service: conduktor-console
       file: conduktor.yml
-    networks:
-      - kafka-platform
-
-  kafkacat:
-    image: confluentinc/cp-kafkacat
-    hostname: kafkacat
-    container_name: kafkacat
-    command: sleep infinity
-    networks:
-      - kafka-platform
 
 volumes:
   pg_data: {}
   conduktor_data: {}
-
-networks:
-  kafka-platform:
-    name: kafka-platform
-    driver: bridge
