@@ -1,0 +1,90 @@
+version: '3.8'
+
+services:
+  zookeeper:
+    image: confluentinc/cp-zookeeper # latest-ubi8 or 7.6.1 is the latest
+    hostname: zookeeper
+    container_name: zookeeper
+    ports:
+      - "2181:2181"
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+      # from official doc
+      # ZOOKEEPER_SERVER_ID: 1
+      # ZOOKEEPER_SERVERS: zookeeper:2888:3888
+
+  broker:
+    image: confluentinc/cp-kafka # latest-ubi8 or 7.6.1 is the latest
+    hostname: broker
+    container_name: broker
+    depends_on:
+      - zookeeper
+    ports:
+      - "29092:29092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: 'zookeeper:2181'
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://broker:9092,PLAINTEXT_HOST://localhost:29092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      # from stack overflow to overcome kafka-ksqldb connection issue:
+      # KAFKA_LISTENERS: "PLAINTEXT://0.0.0.0:29092,CONTROLLER://kafka:29093,PLAINTEXT_HOST://0.0.0.0:9092" 
+      # KAFKA_ADVERTISED_LISTENERS: "PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092"
+
+  schema-registry:
+    iamge: confluentinc/cp-schema-registry # latest-ubi8 or 7.6.1 is the latest
+    hostname: schema-registry
+    container_name: schema-registry
+    ports:
+      - "8081:8081"
+    environment:
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: PLAINTEXT://broker:TODO_port
+      SCHEMA_REGISTRY_HOST_NAME: schema-registry
+      SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
+    depends_on:
+      - zookeeper
+      - broker
+
+  ksqldb-server:
+    image: confluentinc/ksqldb-server # 0.29.0 is the latest in dockerhub
+    hostname: ksqldb-server
+    container_name: ksqldb-server
+    ports:
+      - "8088:8088"
+    environment:
+      - KSQL_BOOTSTRAP_SERVERS=broker:9092
+      - KSQL_KSQL_SERVICE_ID=ksqldb_
+      - KSQL_KSQL_QUERIES_FILE=/opt/data/queries.sql # or KSQL_OPTS="-Dksql.queries.file=/path/in/container/queries.sql"
+      - KSQL_KSQL_LOGGING_PROCESSING_STREAM_AUTO_CREATE="true"
+      - KSQL_KSQL_LOGGING_PROCESSING_TOPIC_AUTO_CREATE="true"
+      - KSQL_KSQL_SCHEMA_REGISTRY_URL=schema-registry:8081
+      # additional log configuration:
+      # - KSQL_LOG4J_PROCESSING_LOG_BROKERLIST=broker:29092
+      # - KSQL_LOG4J_PROCESSING_LOG_TOPIC=demo_processing_log
+      # - KSQL_KSQL_LOGGING_PROCESSING_TOPIC_NAME=demo_processing_log
+      - KSQL_LISTENERS=http://0.0.0.0:8088/
+      # from official doc to enable replication and SASL & JAAS security mechanism enabled:
+      # - KSQL_KSQL_SINK_REPLICAS=3
+      # - KSQL_KSQL_STREAMS_REPLICATION_FACTOR=3
+      # - KSQL_KSQL_INTERNAL_TOPIC_REPLICAS=3
+      # - KSQL_SECURITY_PROTOCOL=SASL_SSL
+      # - KSQL_SASL_MECHANISM=PLAIN
+      # - KSQL_SASL_JAAS_CONFIG="org.apache.kafka.common.security.plain.PlainLoginModule required username=\"<username>\" password=\"<strong-password>\";"
+      # Configuration for UDFs:
+      # - KSQL_KSQL_EXTENSION_DIR="/opt/ksqldb-udfs"
+    depends_on:
+      - broker
+      - schema-registry
+
+  ksqldb-cli:
+    image: confluentinc/ksqldb-cli # 0.29.0 is the latest in dockerhub
+    container_name: ksqldb-cli
+    depends_on:
+      - broker
+      - ksqldb-server
+    entrypoint: /bin/sh
+    tty: true
