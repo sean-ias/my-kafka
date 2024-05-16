@@ -59,7 +59,7 @@ services:
       EXTRA_ARGS: "-Djava.security.auth.login.config=/etc/kafka/zookeeper_jaas.conf"
     volumes:
       - ./etc/secrets/zookeeper_jaas.conf:/etc/kafka/zookeeper_jaas.conf
-      - ./etc/zookeeper.properties:/etc/kafka/zookeeper.properties
+      - ./etc/zookeeper.properties:/etc/confluent/docker/zookeeper.properties.template
     networks:
       - kafka-platform
 
@@ -75,9 +75,9 @@ services:
     environment:
       KAFKA_ZOOKEEPER_CONNECT: "zoo1:2181"
       KAFKA_BROKER_ID: 1
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:SASL_PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT,SASL_HOST:SASL_PLAINTEXT,EXTERNAL:SASL_PLAINTEXT
-      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka1:19092,PLAINTEXT_HOST://localhost:9092,SASL_HOST://localhost:9093,EXTERNAL://192.168.7.212:29092
-      KAFKA_LISTENERS: INTERNAL://kafka1:19092,PLAINTEXT_HOST://localhost:9092,SASL_HOST://localhost:9093,EXTERNAL://0.0.0.0:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:SASL_PLAINTEXT,SASL_HOST:SASL_PLAINTEXT,EXTERNAL:SASL_PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka1:19092,SASL_HOST://localhost:9093,EXTERNAL://192.168.7.212:29092
+      KAFKA_LISTENERS: INTERNAL://kafka1:19092,SASL_HOST://:9093,EXTERNAL://:29092
       KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
       #KAFKA_CONTROLLER_QUORUM_VOTERS: '1@kafka1:29093'
       KAFKA_LOG4J_LOGGERS: "kafka.authorizer.logger=DEBUG,kafka.controller=INFO,kafka.producer.async.DefaultEventHandler=INFO,state.change.logger=INFO"
@@ -192,6 +192,7 @@ services:
   
   kafka-connect:
     image: confluentinc/cp-kafka-connect:${CONFLUENT_VERSION}
+    restart: always
     hostname: kafka-connect
     container_name: kafka-connect
     ports:
@@ -199,7 +200,7 @@ services:
     environment:
       CONNECT_SASL_MECHANISM: SCRAM-SHA-256
       CONNECT_SECURITY_PROTOCOL: SASL_PLAINTEXT
-      CONNECT_BOOTSTRAP_SERVERS: "kafka1:19092"
+      CONNECT_BOOTSTRAP_SERVERS: SASL_PLAINTEXT://kafka1:19092
       CONNECT_REST_PORT: 8083
       CONNECT_GROUP_ID: compose-connect-group
       CONNECT_CONFIG_STORAGE_TOPIC: docker-connect-configs
@@ -246,7 +247,7 @@ services:
     ports:
       - "8088:8088"
     environment:
-      KSQL_BOOTSTRAP_SERVERS: kafka1:19092
+      KSQL_BOOTSTRAP_SERVERS: SASL_PLAINTEXT://kafka1:19092
       KSQL_LISTENERS: http://0.0.0.0:8088/
       KSQL_KSQL_SERVICE_ID: ksqldb-server_1
       # KSQL_KSQL_QUERIES_FILE: /opt/data/queries.sql or KSQL_OPTS="-Dksql.queries.file=/path/in/container/queries.sql"
@@ -254,7 +255,7 @@ services:
       KSQL_KSQL_LOGGING_PROCESSING_TOPIC_AUTO_CREATE: "true"
       KSQL_KSQL_SCHEMA_REGISTRY_URL: schemaregistry:8081
       # additional log configuration:
-      KSQL_LOG4J_PROCESSING_LOG_BROKERLIST: kafka1:19092
+      KSQL_LOG4J_PROCESSING_LOG_BROKERLIST: SASL_PLAINTEXT://kafka1:19092
       KSQL_LOG4J_PROCESSING_LOG_TOPIC: demo_processing_log
       KSQL_KSQL_LOGGING_PROCESSING_TOPIC_NAME: demo_processing_log
       # from official doc to enable replication and SASL & JAAS security mechanism enabled:
