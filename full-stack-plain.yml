@@ -139,14 +139,14 @@ services:
     container_name: postgresql
     extends:
       service: postgresql
-      file: conduktor.yml 
+      file: conduktor_plain.yml 
             
   conduktor-console:
     hostname: conduktor-console
     container_name: conduktor-console
     extends:
       service: conduktor-console
-      file: conduktor.yml
+      file: conduktor_plain.yml
 
 volumes:
   pg_data: {}
