@@ -1,0 +1,203 @@
+version: "3.8"
+
+services:
+  grafana:
+    image: "grafana/grafana:${GRAFANA_VERSION}"
+    ports:
+     - "3000:3000"
+    environment:
+      TZ: "Asia/Tashkent"
+      #GF_PATHS_DATA : /var/lib/grafana
+      GF_SECURITY_ADMIN_PASSWORD : ${GRAFANA_PASSWORD}
+    # volumes:
+    #  - ./grafana/provisioning:/etc/grafana/provisioning
+    #  - ./grafana/dashboards:/var/lib/grafana/dashboards
+    container_name: grafana
+    depends_on:
+     - prometheus
+
+  prometheus:
+    image: "bitnami/prometheus:${PROMETHEUS_VERSION}"
+    ports:
+     - "9090:9090"
+    environment:
+      TZ: "Asia/Tashkent"
+    volumes:
+     - ./etc/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+    command: "--config.file=/etc/prometheus/prometheus.yml"
+    container_name: prometheus
+
+  jmx-kafka1:
+    image: "sscaling/jmx-prometheus-exporter"
+    ports:
+     - "5556:5556"
+    environment:
+     TZ: "Asia/Tashkent"
+     CONFIG_YML : "/etc/jmx_exporter/config.yml"
+     #JVM_OPTS: ${PROMETHEUS_JMX_AGENT_JVM_OPTS}
+    volumes:
+     - ./etc/jmx_exporter/kafka_kraft_3.yml:/etc/jmx_exporter/config.yml
+    container_name: jmx-kafka1
+    depends_on:
+     - kafka1
+
+  kafka1:
+    image: confluentinc/cp-kafka:${CONFLUENT_VERSION}
+    hostname: kafka1
+    container_name: kafka1
+    user: 0:0
+    ports:
+      - "9094:9094"
+      - "9092:9092"
+      - "9997:9997"
+    volumes:
+      - "/var/docker_data/kafka1_data:/var/lib/kafka/data"
+      - "./etc/secrets/:/etc/kafka/jaas/"
+    environment:
+    # KRaft settings
+      TZ: "Asia/Tashkent"
+      KAFKA_NODE_ID: 1
+      CLUSTER_ID: 'ciWo7IWazngRchmPES6q5A=='
+      KAFKA_KRAFT_MODE: "true"
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka1:9093
+    # Listeners
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: 'SASL_PLAINTEXT'
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:SASL_PLAINTEXT,SASL_PLAINTEXT:SASL_PLAINTEXT,SASL_HOST:SASL_PLAINTEXT,EXTERNAL:SASL_PLAINTEXT
+      KAFKA_LISTENERS: CONTROLLER://kafka1:9093,SASL_PLAINTEXT://kafka1:29092,SASL_HOST://:9092,EXTERNAL://:9094
+      KAFKA_ADVERTISED_LISTENERS: SASL_PLAINTEXT://kafka1:29092,SASL_HOST://${DOCKER_CONTAINER_IP}:9092,EXTERNAL://192.168.100.161:9094
+      KAFKA_JMX_PORT: 9997
+      KAFKA_JMX_HOSTNAME: localhost
+    # SASL
+      KAFKA_AUTHORIZER_CLASS_NAME: org.apache.kafka.metadata.authorizer.StandardAuthorizer
+      KAFKA_SASL_ENABLED_MECHANISMS: 'PLAIN'
+      KAFKA_SASL_MECHANISM_INTER_BROKER_PROTOCOL: 'PLAIN'
+      KAFKA_SASL_MECHANISM_CONTROLLER_PROTOCOL: 'PLAIN'
+      KAFKA_SECURITY_PROTOCOL: 'SASL_PLAINTEXT'
+    # ACL
+      KAFKA_SUPER_USERS: User:admin,User:controller;User:ANONYMOUS
+      KAFKA_ALLOW_EVERYONE_IF_NO_ACL_FOUND: 'true'
+      KAFKA_OPTS: "-Djava.security.auth.login.config=/etc/kafka/jaas/kafka_server_jaas.conf"
+      KAFKA_EARLY_START_LISTENERS: CONTROLLER
+    # SETTINGS
+      KAFKA_LOG_DIRS: /tmp/kraft-combined-logs
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: true
+    #  KAFKA_HEAP_OPTS: ${KAFKA_BROKER_HEAP_OPTS}
+    # deploy:
+    #   resources:
+    #     limits:
+    #       memory: ${KAFKA_BROKER_MEM_LIMIT}
+
+  kafka-ui:
+    container_name: kafka-ui
+    image: provectuslabs/kafka-ui:latest
+    depends_on: 
+      - kafka1
+    ports:
+      - 8080:8080
+    environment:
+      TZ: "Asia/Tashkent"
+      DYNAMIC_CONFIG_ENABLED: 'true'
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka1:29092
+      KAFKA_CLUSTERS_0_PROPERTIES_SECURITY_PROTOCOL: SASL_PLAINTEXT
+      KAFKA_CLUSTERS_0_PROPERTIES_SASL_MECHANISM: PLAIN
+      KAFKA_CLUSTERS_0_PROPERTIES_SASL_JAAS_CONFIG: |
+        org.apache.kafka.common.security.plain.PlainLoginModule required 
+        username="admin" 
+        password="admin159";
+      AUTH_TYPE: LOGIN_FORM
+      SPRING_SECURITY_USER_NAME: admin
+      SPRING_SECURITY_USER_PASSWORD: admin159
+      # LOGGING_LEVEL_ROOT: 'DEBUG'
+
+  kafka-ui2:
+    container_name: kafka-ui2
+    image: provectuslabs/kafka-ui:latest
+    depends_on: 
+      - kafka1
+    ports:
+      - 8070:8080
+    environment:
+      TZ: "Asia/Tashkent"
+      DYNAMIC_CONFIG_ENABLED: 'true'
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka1:29092
+      KAFKA_CLUSTERS_0_PROPERTIES_SECURITY_PROTOCOL: SASL_PLAINTEXT
+      KAFKA_CLUSTERS_0_PROPERTIES_SASL_MECHANISM: PLAIN
+      KAFKA_CLUSTERS_0_PROPERTIES_SASL_JAAS_CONFIG: |
+        org.apache.kafka.common.security.plain.PlainLoginModule required 
+        username="read" 
+        password="123456";
+      AUTH_TYPE: LOGIN_FORM
+      SPRING_SECURITY_USER_NAME: admin
+      SPRING_SECURITY_USER_PASSWORD: 123456
+      # LOGGING_LEVEL_ROOT: 'DEBUG'
+
+  schema-registry:
+    image: confluentinc/cp-schema-registry:${CONFLUENT_VERSION}
+    hostname: schema-registry
+    container_name: schema-registry
+    depends_on:
+      - kafka1
+    ports:
+      - "8081:8081"
+    environment:
+      TZ: "Asia/Tashkent"
+      SCHEMA_REGISTRY_HOST_NAME: schema-registry
+      SCHEMA_REGISTRY_KAFKASTORE_SECURITY_PROTOCOL: SASL_PLAINTEXT
+      SCHEMA_REGISTRY_KAFKASTORE_SASL_MECHANISM: PLAIN
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: kafka1:29092
+      SCHEMA_REGISTRY_KAFKASTORE_SASL_JAAS_CONFIG: |
+        org.apache.kafka.common.security.plain.PlainLoginModule required \
+        username="admin" \
+        password="admin159";
+      SCHEMA_REGISTRY_LISTENERS: 'http://0.0.0.0:8081'
+     # SCHEMA_REGISTRY_DEBUG: 'true'
+
+  ksqldb-server:
+    image: confluentinc/cp-ksqldb-server:${CONFLUENT_VERSION}
+    hostname: ksqldb-server
+    container_name: ksqldb-server
+    depends_on:
+      - kafka1
+    ports:
+      - "8088:8088"
+    environment:
+      TZ: "Asia/Tashkent"
+      KSQL_CONFIG_DIR: "/etc/ksqldb"
+      KSQL_BOOTSTRAP_SERVERS: kafka1:29092
+      KSQL_HOST_NAME: ksqldb-server
+      KSQL_LISTENERS: "http://0.0.0.0:8088"
+      KSQL_KSQL_SCHEMA_REGISTRY_URL: "http://schema-registry:8081"
+      KSQL_KSQL_LOGGING_PROCESSING_TOPIC_REPLICATION_FACTOR: 1
+      KSQL_KSQL_LOGGING_PROCESSING_TOPIC_AUTO_CREATE: 'true'
+      KSQL_KSQL_LOGGING_PROCESSING_STREAM_AUTO_CREATE: 'true'
+      KSQL_LOG4J_PROCESSING_LOG_BROKERLIST: kafka1:29092
+      KSQL_LOG4J_PROCESSING_LOG_TOPIC: demo_processing_log
+      KSQL_KSQL_LOGGING_PROCESSING_TOPIC_NAME: demo_processing_log
+      KSQL_SECURITY_PROTOCOL: SASL_PLAINTEXT
+      KSQL_SASL_MECHANISM: PLAIN
+      KSQL_SASL_JAAS_CONFIG: |
+        org.apache.kafka.common.security.plain.PlainLoginModule required \
+        username="admin" \
+        password="admin159";
+
+  ksqldb-cli:
+    image: confluentinc/cp-ksqldb-cli:${CONFLUENT_VERSION}
+    container_name: ksqldb-cli
+    depends_on:
+      - kafka1
+      - ksqldb-server
+    entrypoint: /bin/sh
+    tty: true
+
+# networks:
+#   default:
+#     name: my-kraft-network
+#     external: true
